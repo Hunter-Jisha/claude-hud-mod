@@ -1,0 +1,5 @@
+{
+  "name": "session-hud",
+  "owner": { "name": "Hunter-Jisha" },
+  "plugins": [{ "name": "session-hud", "source": "./" }]
+}

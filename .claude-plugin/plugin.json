@@ -1,0 +1,6 @@
+{
+  "name": "session-hud",
+  "version": "0.1.0",
+  "description": "Sidebar with goal, todos, context window and plan usage; compact line above the prompt when narrow",
+  "types": "./types/index.d.ts"
+}
