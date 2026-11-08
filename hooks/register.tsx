@@ -6,6 +6,14 @@ import type { Meter, Plan, Section, Todo, TodoStatus, Usage, Visibility } from '
 const PANE = 'session-hud'
 const TITLE = 'Session'
 const VISIBILITY_STORE_KEY = 'visibility'
+const PLAN_TOOL = 'mcp__session-hud__plan'
+const PLAN_INSTRUCTIONS = `# Session HUD
+The user watches a HUD beside the chat that shows your current goal and todo list. It is filled only by the ${PLAN_TOOL} tool.
+- For any request you do work on (editing, investigating, reading code, running commands, researching), call ${PLAN_TOOL} before your other tools, however small the task: a one-line goal and at least one todo. A single todo is fine for a small task.
+- A new request gets a new goal and list.
+- Update it as each todo starts and finishes, and mark every todo completed when you are done.
+- Skip it only for questions you answer without using any tools.`
+const PLAN_REMINDER = `The session HUD has no plan for this request yet. Call ${PLAN_TOOL} now with a one-line goal and the todo list (at least one item), then keep it updated as you work.`
 
 const defaultVisibility: Visibility = { context: true, goal: true, todo: true, usage: true }
 const sectionNames: Record<Section, string> = { context: 'Context', goal: 'Goal', todo: 'Todo', usage: 'Plan usage' }
@@ -119,7 +127,7 @@ export const register: Register = on => {
       name: 'plan',
       isDeferred: false,
       description:
-        "Updates the session HUD the user watches beside the chat. Call it at the start of any multi-step task with a one-line goal and the ordered steps you will take, and call it again whenever a step starts or finishes, or the plan changes. Always send the whole todo list. Keep exactly one item in_progress while working. Skip it for one-step answers.",
+        'Updates the session HUD the user watches beside the chat. Call it first for any request you do work on, however small, with a one-line goal and the ordered todos (at least one). Call it again whenever a todo starts or finishes, or the plan changes. Always send the whole todo list. Keep exactly one item in_progress while working, and mark everything completed when done. Skip it only for questions answered without using tools.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -173,7 +181,26 @@ export const register: Register = on => {
     return { text: `${sectionNames[section]} ${nextVisibility[section] ? 'shown' : 'hidden'}.` }
   })
 
-  on('tool.call', { tool: 'mcp__session-hud__plan' }, async ($, e) => {
+  let isPlannedThisPrompt = false
+  let isRemindedThisPrompt = false
+
+  on('prompt.submit', async ($, e, next) => {
+    isPlannedThisPrompt = false
+    isRemindedThisPrompt = false
+
+    return next(e)
+  })
+
+  on('prompt.compose', async ($, e, next) => {
+    const composed = await next(e)
+
+    if (!e.tools.includes(PLAN_TOOL)) return composed
+
+    return { sections: [...composed.sections, { id: 'session-hud:plan', text: PLAN_INSTRUCTIONS, scope: 'session' as const }] }
+  }).catch(($, e, next) => next(e))
+
+  on('tool.call', { tool: PLAN_TOOL }, async ($, e) => {
+    isPlannedThisPrompt = true
     const input = e as unknown as { goal?: string; todos?: Todo[] }
     await update($, plan, current => ({
       goal: input.goal ?? current.goal,
@@ -197,7 +224,14 @@ export const register: Register = on => {
     const result = await next(e)
     void refreshUsage($).catch(() => undefined)
 
-    return result
+    const isReminderDue =
+      e.tool !== PLAN_TOOL && !isPlannedThisPrompt && !isRemindedThisPrompt && result.deny === undefined && !result.isError
+
+    if (!isReminderDue) return result
+
+    isRemindedThisPrompt = true
+
+    return { ...result, context: [...(result.context ?? []), PLAN_REMINDER] }
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
